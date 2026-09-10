@@ -1,0 +1,14 @@
+group,pair,beta,pvalue,cointegrated_naive_0.05,cointegrated_bonferroni
+energy,XLE-XOP,0.308,0.5689,False,False
+energy,XLE-USO,0.217,0.9475,False,False
+energy,XOP-USO,0.922,0.6426,False,False
+financials,XLF-KBE,0.948,0.3669,False,False
+financials,XLF-KRE,0.761,0.7431,False,False
+financials,KBE-KRE,0.912,0.9529,False,False
+gold,GLD-GDX,4.175,0.6514,False,False
+gold,GLD-GDXJ,3.122,0.7186,False,False
+gold,GDX-GDXJ,0.761,0.4288,False,False
+semis,SMH-SOXX,1.149,0.4912,False,False
+broad_market,SPY-IVV,0.993,0.3619,False,False
+broad_market,SPY-VOO,1.085,0.1174,False,False
+broad_market,IVV-VOO,1.093,0.0,True,True
