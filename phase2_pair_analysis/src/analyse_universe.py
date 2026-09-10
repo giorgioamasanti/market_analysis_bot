@@ -67,11 +67,8 @@ def run():
         all_pair_results.append(pair_df)
 
         # --- Johansen on the full group ---
-        try:
-            jh = johansen_test(prices[available])
-            print(f"\n{jh}")
-        except Exception as e:
-            print(f"\nJohansen failed: {e}")
+        jh = johansen_test(prices[available])
+        print(f"\n{jh}")
 
         print()
 

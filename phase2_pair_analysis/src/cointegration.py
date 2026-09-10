@@ -87,13 +87,18 @@ def adf_pvalue(series: pd.Series) -> float:
 @dataclass
 class JohansenResult:
     tickers: list[str]
-    rank: int                       # number of cointegrating relationships found
-    trace_stats: np.ndarray
-    trace_crit_95: np.ndarray
-    eigenvectors: np.ndarray        # columns = cointegrating vectors (beta), strongest first
-    top_vector: np.ndarray          # the single strongest cointegrating relationship
+    stable: bool                                  # False if the solve was numerically unstable
+    rank: int | None = None                        # None when unstable - see fallback_pair instead
+    trace_stats: np.ndarray | None = None
+    trace_crit_95: np.ndarray | None = None
+    eigenvectors: np.ndarray | None = None          # columns = cointegrating vectors, strongest first
+    top_vector: np.ndarray | None = None
+    fallback_pair: "EngleGrangerResult | None" = None  # auto-run when Johansen was unstable
 
     def __repr__(self):
+        if not self.stable:
+            return (f"Johansen({','.join(self.tickers)}): UNSTABLE (near-singular covariance matrix) "
+                    f"- fell back to pairwise Engle-Granger on the offending pair: {self.fallback_pair}")
         return (f"Johansen({','.join(self.tickers)}): rank={self.rank}/{len(self.tickers)-1}, "
                 f"top_vector={np.round(self.top_vector, 3).tolist()}")
 
@@ -102,18 +107,18 @@ import warnings
 from numpy.exceptions import ComplexWarning
 
 
-def _pairwise_corr_report(prices: pd.DataFrame) -> str:
-    """Human-readable pairwise correlations, for the error message below -
-    tells you WHICH pair to investigate/drop without having to go look."""
+def _most_correlated_pair(prices: pd.DataFrame) -> tuple[str, str, float]:
+    """Identifies which two columns are driving a collinearity problem -
+    used both for the error/fallback message and to pick which pair to
+    automatically re-test with Engle-Granger."""
     corr = prices.corr().abs()
     corr_vals = corr.values.copy()
     np.fill_diagonal(corr_vals, 0)
     i, j = np.unravel_index(np.argmax(corr_vals), corr_vals.shape)
-    return f"{corr.index[i]}~{corr.columns[j]} at {corr_vals[i, j]:.4f}"
+    return corr.index[i], corr.columns[j], corr_vals[i, j]
 
 
-def _run_johansen_checked(values: np.ndarray, det_order: int, k_ar_diff: int,
-                           tickers: list[str], prices: pd.DataFrame):
+def _run_johansen_checked(values: np.ndarray, det_order: int, k_ar_diff: int):
     """
     Runs coint_johansen while actively watching for the ComplexWarning that
     signals a near-singular covariance matrix. We deliberately do NOT rely
@@ -124,26 +129,16 @@ def _run_johansen_checked(values: np.ndarray, det_order: int, k_ar_diff: int,
     genuinely cointegrated pairs. Catching the actual warning at the
     source is the only reliable signal.
 
-    If it fires, the reported rank/eigenvectors are numerically meaningless
-    (spurious complex values silently cast to real) and we raise rather
-    than let a broken result look like a real "no cointegration" finding.
+    Returns (result, stable). When stable=False, the caller should not
+    trust result at all - the reported eigenvalues/rank would be
+    numerically meaningless (spurious complex values silently cast to
+    real by statsmodels), not a genuine "no cointegration" finding.
     """
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
         result = coint_johansen(values, det_order, k_ar_diff)
-
-        if any(issubclass(w.category, ComplexWarning) for w in caught):
-            raise ValueError(
-                f"Johansen test on {tickers} hit a near-singular covariance matrix "
-                f"(statsmodels had to discard complex eigenvalue components - the "
-                f"reported rank would be numerically meaningless, not a real finding "
-                f"of 'no cointegration'). Most correlated pair in this group: "
-                f"{_pairwise_corr_report(prices)}. These are likely near-substitutes - "
-                f"either test the group's pairs individually with engle_granger_test(), "
-                f"or drop one of the two most-correlated assets and retry Johansen."
-            )
-
-    return result
+        stable = not any(issubclass(w.category, ComplexWarning) for w in caught)
+    return result, stable
 
 
 def johansen_test(prices: pd.DataFrame, det_order: int = 0, k_ar_diff: int = 1,
@@ -172,22 +167,41 @@ def johansen_test(prices: pd.DataFrame, det_order: int = 0, k_ar_diff: int = 1,
     value at each candidate rank, walking up from 0 - this is the standard
     sequential testing procedure (stop at the first rank you fail to reject).
 
-    Raises ValueError if any two input series are too collinear for a
-    numerically stable solve (see _check_collinearity) - this is a real
-    failure mode with near-substitute assets (e.g. GDX/GDXJ), not an edge
-    case worth ignoring: an ill-conditioned solve can silently produce
-    complex eigenvalues that get cast to real, making the reported rank
-    meaningless rather than merely imprecise.
+    If the solve is numerically unstable (near-singular covariance matrix,
+    almost always caused by two near-substitute assets in the group - e.g.
+    GDX/GDXJ), we don't return a meaningless rank. Instead we automatically
+    identify the most correlated pair and re-test THEM with a plain
+    pairwise Engle-Granger test, since that's numerically robust regardless
+    of how collinear two series are. Check `result.stable` - if False,
+    `result.fallback_pair` holds that Engle-Granger result instead.
     """
     prices = prices.dropna()
     if len(prices) < 30:
         raise ValueError(f"Only {len(prices)} observations - need more history")
 
-    values = np.log(prices.values) if use_log else prices.values
-    result = _run_johansen_checked(values, det_order, k_ar_diff, list(prices.columns), prices)
+    if use_log and (prices.values <= 0).any():
+        bad_cols = prices.columns[(prices <= 0).any()].tolist()
+        raise ValueError(
+            f"use_log=True requires strictly positive prices, but found non-positive "
+            f"values in: {bad_cols}. Real market prices should never trigger this - "
+            f"if you're testing with synthetic data, check your simulation doesn't "
+            f"let a random walk drift below zero, or pass use_log=False."
+        )
 
-    trace_stats = result.lr1            # trace statistic per candidate rank
-    trace_crit_95 = result.cvt[:, 1]    # 95% critical value column
+    values = np.log(prices.values) if use_log else prices.values
+    raw_result, stable = _run_johansen_checked(values, det_order, k_ar_diff)
+
+    if not stable:
+        ticker_a, ticker_b, corr = _most_correlated_pair(prices)
+        eg = engle_granger_test(prices[ticker_a], prices[ticker_b])
+        return JohansenResult(
+            tickers=list(prices.columns),
+            stable=False,
+            fallback_pair=eg,
+        )
+
+    trace_stats = raw_result.lr1            # trace statistic per candidate rank
+    trace_crit_95 = raw_result.cvt[:, 1]    # 95% critical value column
 
     rank = 0
     for r in range(len(trace_stats)):
@@ -196,10 +210,11 @@ def johansen_test(prices: pd.DataFrame, det_order: int = 0, k_ar_diff: int = 1,
         else:
             break
 
-    eigenvectors = result.evec  # columns ordered by eigenvalue, strongest relationship first
+    eigenvectors = raw_result.evec  # columns ordered by eigenvalue, strongest relationship first
 
     return JohansenResult(
         tickers=list(prices.columns),
+        stable=True,
         rank=rank,
         trace_stats=trace_stats,
         trace_crit_95=trace_crit_95,

@@ -46,6 +46,40 @@ def make_independent_walks():
     return pd.Series(a, index=idx, name="X"), pd.Series(b, index=idx, name="Y")
 
 
+def test_johansen_fallback():
+    """
+    Validates the automatic Engle-Granger fallback when Johansen hits a
+    near-singular covariance matrix. We force the unstable code path
+    directly (via monkeypatching the internal solve) rather than relying
+    on a random synthetic draw to happen to trigger the real statsmodels
+    ComplexWarning - that's possible but not reliably reproducible on
+    demand, since it depends on internals we don't control. This checks
+    the fallback WIRING is correct regardless of what triggers it.
+    """
+    from unittest.mock import patch
+
+    idx = pd.date_range("2022-01-01", periods=200, freq="B")
+    a = pd.Series(100 + np.cumsum(np.random.normal(0, 1, 200)), index=idx, name="A")
+    b = (a * 1.0001).rename("B")  # deliberate near-duplicate, so we can check
+                                    # the fallback picks THIS pair specifically
+    c = pd.Series(100 + np.cumsum(np.random.normal(0, 1, 200)), index=idx, name="C")
+    df = pd.DataFrame({"A": a, "B": b, "C": c})
+
+    def fake_unstable(*args, **kwargs):
+        return None, False  # simulate statsmodels reporting instability
+
+    with patch("src.cointegration._run_johansen_checked", side_effect=fake_unstable):
+        result = johansen_test(df)
+
+    assert result.stable is False, "FAIL: should report instability"
+    assert result.fallback_pair is not None, "FAIL: should have run the EG fallback"
+    assert {result.fallback_pair.ticker_a, result.fallback_pair.ticker_b} == {"A", "B"}, \
+        "FAIL: fallback should target the most correlated pair (A, B)"
+    print(f"Johansen fallback correctly identified and re-tested the offending pair: "
+          f"{result.fallback_pair}")
+    print("  -> automatic fallback wiring confirmed correct\n")
+
+
 def run():
     print("=" * 70)
     print("TEST 1: genuinely cointegrated pair (true beta = 2)")
@@ -91,3 +125,5 @@ def run():
 
 if __name__ == "__main__":
     run()
+    print()
+    test_johansen_fallback()
