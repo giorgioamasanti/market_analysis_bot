@@ -23,12 +23,24 @@ END_DATE = None  # None = up to today
 # economic reason to expect a relationship) rather than firing Johansen
 # at a random basket and p-hacking your way to a "result".
 UNIVERSE = {
-    "energy": ["XLE", "XOP", "USO"],           # sector ETF + sub-sector + crude proxy
-    "financials": ["XLF", "KBE", "KRE"],       # broad financials, banks, regional banks
-    "gold": ["GLD", "GDX", "GDXJ"],            # bullion vs miners vs junior miners
-    "semis": ["SMH", "SOXX"],                  # two semiconductor ETFs, different providers
-    "broad_market": ["SPY", "IVV", "VOO"],     # three S&P 500 trackers - near-perfect cointegration
-                                                 # sanity check: if this pair fails, your pipeline is broken
+    "energy": ["XLE", "XOP", "USO"],
+    "oil_majors": ["XOM", "CVX", "BP", "SHEL"],
+    "financials": ["XLF", "KBE", "KRE"],
+    "banks": ["JPM", "BAC", "WFC", "C"],
+    "gold": ["GLD", "GDX", "GDXJ"],
+    "silver_gold": ["SLV", "GLD", "GDX"],
+    "semis": ["SMH", "SOXX"],
+    "tech_megacap": ["QQQ", "XLK", "VGT"],
+    "broad_market": ["SPY", "IVV", "VOO"],
+    "airlines": ["DAL", "UAL", "AAL", "LUV"],
+    "homebuilders": ["DHI", "LEN", "PHM", "NVR"],
+    "retailers": ["WMT", "TGT", "COST"],
+    "auto": ["GM", "F", "TM"],
+    "healthcare": ["XLV", "IHI", "IBB"],
+    "staples": ["XLP", "KO", "PEP"],
+    "country_etfs": ["EWJ", "EWG", "EWU", "EWC"],
+    "bonds": ["TLT", "IEF", "SHY", "AGG"],
+    "reits": ["VNQ", "IYR", "SCHH"],
 }
 
 def all_tickers() -> list[str]:
