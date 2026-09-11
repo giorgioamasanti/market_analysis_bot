@@ -31,6 +31,18 @@ def scan_pairs_in_group(prices: pd.DataFrame, group_name: str, tickers: list[str
     rows = []
     for a, b in pairs:
         result = engle_granger_test(prices[a], prices[b])
+
+        # Report both price-LEVEL correlation and RETURNS correlation.
+        # These often diverge a lot, and the gap is informative: two
+        # trending series can show high level-correlation purely from a
+        # shared secular trend (the "spurious regression" trap) even with
+        # low correlation in day-to-day moves, or vice versa. High returns
+        # correlation with NO cointegration (like GLD/GDX/GDXJ) is a
+        # coherent, real pattern: correlated shocks, but no stable
+        # long-run price ratio.
+        level_corr = prices[a].corr(prices[b])
+        returns_corr = prices[a].pct_change().corr(prices[b].pct_change())
+
         rows.append({
             "group": group_name,
             "pair": f"{a}-{b}",
@@ -38,6 +50,8 @@ def scan_pairs_in_group(prices: pd.DataFrame, group_name: str, tickers: list[str
             "pvalue": round(result.coint_pvalue, 4),
             "cointegrated_naive_0.05": result.coint_pvalue < 0.05,
             "cointegrated_bonferroni": result.coint_pvalue < bonferroni_alpha,
+            "level_corr": round(level_corr, 3),
+            "returns_corr": round(returns_corr, 3),
         })
 
     return pd.DataFrame(rows)
