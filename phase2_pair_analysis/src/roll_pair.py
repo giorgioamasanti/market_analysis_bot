@@ -15,6 +15,7 @@ import argparse
 
 from src.loader import get_prices
 from src.rolling_analysis import rolling_engle_granger, summarize_stability
+from src.null_benchmark import benchmark_against_null
 
 
 def main():
@@ -39,8 +40,16 @@ def main():
     print(f"Rolling Engle-Granger: {args.ticker_a} ~ {args.ticker_b} "
           f"(window={args.window}d, step={args.step}d)\n")
     print(f"Time cointegrated: {stability['pct_time_cointegrated']}%")
-    print(f"Beta std dev: {stability['beta_std']}  (range: {stability['beta_range']})")
+    print(f"Beta std dev: {stability['beta_std']}  (range: {stability['beta_range']}, "
+          f"CV: {stability['beta_cv_pct']}%)")
     print(f"Longest consecutive breakdown: {stability['longest_breakdown_windows']} windows\n")
+
+    # Automatic significance benchmark - is this % time cointegrated
+    # actually distinguishable from what two UNRELATED assets would show
+    # by chance, tested with this exact window/step? See null_benchmark.py.
+    print("Significance check (vs simulated unrelated-asset null):")
+    bench = benchmark_against_null(rolling, window=args.window, step=args.step)
+    print(f"  {bench}\n")
 
     # Print the actual transitions - where did it flip from cointegrated to
     # not, or vice versa? This is the literal answer to "where does it break".

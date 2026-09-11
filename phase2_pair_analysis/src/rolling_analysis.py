@@ -63,6 +63,12 @@ def summarize_stability(rolling_result: pd.DataFrame) -> dict:
     pct_time_cointegrated = 100 * rolling_result["is_cointegrated"].mean()
     beta_std = rolling_result["beta"].std()
     beta_range = rolling_result["beta"].max() - rolling_result["beta"].min()
+    beta_mean = rolling_result["beta"].mean()
+    # coefficient of variation: beta_std relative to beta's own magnitude -
+    # a hedge ratio of "1.09 +/- 0.0007" is trivially stable (CV ~0.06%), a
+    # hedge ratio of "1.5 +/- 0.6" (CV ~40%) is not really a fixed ratio at
+    # all, regardless of what the significance test says about any single window
+    beta_cv_pct = 100 * beta_std / abs(beta_mean) if beta_mean != 0 else float("inf")
 
     # Longest consecutive stretch NOT cointegrated - a single bad week is
     # noise, a 6-month stretch of non-cointegration is a genuine breakdown.
@@ -75,5 +81,6 @@ def summarize_stability(rolling_result: pd.DataFrame) -> dict:
         "pct_time_cointegrated": round(pct_time_cointegrated, 1),
         "beta_std": round(beta_std, 4),
         "beta_range": round(beta_range, 4),
+        "beta_cv_pct": round(beta_cv_pct, 2),
         "longest_breakdown_windows": longest_breakdown,
     }
