@@ -84,3 +84,77 @@ def summarize_stability(rolling_result: pd.DataFrame) -> dict:
         "beta_cv_pct": round(beta_cv_pct, 2),
         "longest_breakdown_windows": longest_breakdown,
     }
+
+
+def identify_regimes(rolling_result: pd.DataFrame) -> pd.DataFrame:
+    """
+    Groups the rolling output into contiguous "regimes" - maximal runs of
+    consecutive windows sharing the same is_cointegrated value - instead of
+    a long list of individual window flips. This is what actually answers
+    "where should I look" rather than making you eyeball a transition list.
+
+    Returns one row per regime: start/end date, duration, mean p-value and
+    beta within it. A regime with is_cointegrated=True and very low mean
+    p-value spanning a long duration is a strong "study/trade this window"
+    candidate; a long is_cointegrated=False regime is a genuine breakdown
+    period worth understanding (see summarize_regimes for auto-highlights).
+    """
+    grouped = rolling_result.copy()
+    # each time is_cointegrated flips, start a new group id
+    group_id = (grouped["is_cointegrated"] != grouped["is_cointegrated"].shift()).cumsum()
+
+    regimes = []
+    for _, block in grouped.groupby(group_id):
+        regimes.append({
+            "start": block.index[0],
+            "end": block.index[-1],
+            "is_cointegrated": bool(block["is_cointegrated"].iloc[0]),
+            "n_windows": len(block),
+            "mean_pvalue": block["pvalue"].mean(),
+            "min_pvalue": block["pvalue"].min(),
+            "mean_beta": block["beta"].mean(),
+            "beta_std": block["beta"].std() if len(block) > 1 else 0.0,
+        })
+
+    return pd.DataFrame(regimes)
+
+
+def summarize_regimes(regimes: pd.DataFrame, top_n: int = 3) -> str:
+    """
+    Picks out the regimes actually worth looking at by hand, rather than
+    making you scan the full table:
+      - longest cointegrated regime(s) - best candidate windows to study
+        or build a strategy around
+      - longest breakdown regime(s) - the most significant instability,
+        worth understanding WHY (a specific event? a slow structural drift?)
+      - strongest cointegrated regime(s) by lowest mean p-value - most
+        statistically confident, even if not the longest
+
+    Returns a formatted string ready to print.
+    """
+    coint = regimes[regimes["is_cointegrated"]].sort_values("n_windows", ascending=False)
+    breakdown = regimes[~regimes["is_cointegrated"]].sort_values("n_windows", ascending=False)
+    strongest = regimes[regimes["is_cointegrated"]].sort_values("mean_pvalue")
+
+    lines = []
+
+    lines.append("Longest cointegrated regime(s) - best windows to study/trade:")
+    if coint.empty:
+        lines.append("  (none - never cointegrated in this sample)")
+    for _, r in coint.head(top_n).iterrows():
+        lines.append(f"  {r['start'].date()} -> {r['end'].date()}  "
+                      f"({r['n_windows']} windows, mean p={r['mean_pvalue']:.4f}, "
+                      f"beta={r['mean_beta']:.3f} +/- {r['beta_std']:.4f})")
+
+    lines.append("\nLongest breakdown regime(s) - most significant instability:")
+    for _, r in breakdown.head(top_n).iterrows():
+        lines.append(f"  {r['start'].date()} -> {r['end'].date()}  ({r['n_windows']} windows)")
+
+    lines.append("\nMost confidently cointegrated regime(s) - lowest average p-value:")
+    if strongest.empty:
+        lines.append("  (none)")
+    for _, r in strongest.head(top_n).iterrows():
+        lines.append(f"  {r['start'].date()} -> {r['end'].date()}  "
+                      f"(mean p={r['mean_pvalue']:.4f}, {r['n_windows']} windows)")
+
+    return "\n".join(lines)

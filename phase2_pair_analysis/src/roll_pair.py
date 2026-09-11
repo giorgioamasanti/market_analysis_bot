@@ -14,8 +14,10 @@ Usage:
 import argparse
 
 from src.loader import get_prices
-from src.rolling_analysis import rolling_engle_granger, summarize_stability
+from src.rolling_analysis import (rolling_engle_granger, summarize_stability,
+                                   identify_regimes, summarize_regimes)
 from src.null_benchmark import benchmark_against_null
+from src.plotting import plot_rolling_diagnostics
 
 
 def main():
@@ -65,6 +67,19 @@ def main():
     out_path = f"data/clean/rolling_{args.ticker_a}_{args.ticker_b}.csv"
     rolling.to_csv(out_path)
     print(f"\nFull series saved -> {out_path} (plot pvalue and beta over time from this)")
+
+    # --- regime highlights ---
+    regimes = identify_regimes(rolling)
+    print("\n" + "=" * 70)
+    print("REGIME HIGHLIGHTS")
+    print("=" * 70)
+    print(summarize_regimes(regimes))
+
+    # --- diagnostic plot ---
+    plot_path = f"data/clean/rolling_{args.ticker_a}_{args.ticker_b}.png"
+    plot_rolling_diagnostics(rolling, f"{args.ticker_a}-{args.ticker_b}", plot_path)
+    print(f"\nDiagnostic plot saved -> {plot_path} "
+          f"(p-value + beta over time, regimes shaded green/red)")
 
 
 if __name__ == "__main__":
